@@ -1,7 +1,6 @@
 import functools
 import time
-from pathlib import Path
-from typing import List, Dict, Any, Iterable, Set, Tuple, Optional
+from typing import List, Dict, Any, Iterable, Set, Tuple, Optional, AbstractSet
 
 from .compile import CompileRunner, CompileTask
 
@@ -19,7 +18,6 @@ from dbt import tracking
 from dbt import utils
 from dbt.adapters.base import BaseRelation
 from dbt.clients.jinja import MacroGenerator
-from dbt.compilation import compile_node
 from dbt.context.providers import generate_runtime_model
 from dbt.contracts.graph.compiled import CompileResultNode
 from dbt.contracts.graph.manifest import WritableManifest
@@ -247,32 +245,6 @@ class RunTask(CompileTask):
         super().__init__(args, config)
         self.ran_hooks = []
         self._total_executed = 0
-        self.deferred_manifest: Optional[WritableManifest] = None
-
-    def _get_state_path(self) -> Path:
-        if self.args.state is not None:
-            return self.args.state
-        else:
-            raise RuntimeException(
-                'Received a --defer argument, but no value was provided '
-                'to --state'
-            )
-
-    def _get_deferred_manifest(self) -> Optional[WritableManifest]:
-        if not self.args.defer:
-            return None
-
-        path = self._get_state_path()
-
-        if not path.is_absolute():
-            path = Path(self.config.project_root) / path
-        if path.exists() and not path.is_file():
-            path = path / 'manifest.json'
-        if not path.exists():
-            raise RuntimeException(
-                f'Could not find --state path: "{path}"'
-            )
-        return WritableManifest.read(str(path))
 
     def index_offset(self, value: int) -> int:
         return self._total_executed + value
@@ -281,8 +253,8 @@ class RunTask(CompileTask):
         return False
 
     def get_hook_sql(self, adapter, hook, idx, num_hooks, extra_context):
-        compiled = compile_node(adapter, self.config, hook, self.manifest,
-                                extra_context)
+        compiler = adapter.get_compiler()
+        compiled = compiler.compile_node(hook, self.manifest, extra_context)
         statement = compiled.injected_sql
         hook_index = hook.index or num_hooks
         hook_obj = get_hook(statement, index=hook_index)
@@ -383,9 +355,26 @@ class RunTask(CompileTask):
             "Finished running {stat_line}{execution}."
             .format(stat_line=stat_line, execution=execution))
 
-    def defer_to_manifest(self, selected_uids):
-        self.deferred_manifest = self._get_deferred_manifest()
-        if self.deferred_manifest is None:
+    def _get_deferred_manifest(self) -> Optional[WritableManifest]:
+        if not self.args.defer:
+            return None
+
+        state = self.previous_state
+        if state is None:
+            raise RuntimeException(
+                'Received a --defer argument, but no value was provided '
+                'to --state'
+            )
+
+        if state.manifest is None:
+            raise RuntimeException(
+                f'Could not find manifest in --state path: "{self.args.state}"'
+            )
+        return state.manifest
+
+    def defer_to_manifest(self, selected_uids: AbstractSet[str]):
+        deferred_manifest = self._get_deferred_manifest()
+        if deferred_manifest is None:
             return
         if self.manifest is None:
             raise InternalException(
@@ -393,13 +382,13 @@ class RunTask(CompileTask):
                 'manifest to defer from!'
             )
         self.manifest.merge_from_artifact(
-            other=self.deferred_manifest,
+            other=deferred_manifest,
             selected=selected_uids,
         )
         # TODO: is it wrong to write the manifest here? I think it's right...
         self.write_manifest()
 
-    def before_run(self, adapter, selected_uids):
+    def before_run(self, adapter, selected_uids: AbstractSet[str]):
         self.defer_to_manifest(selected_uids)
         with adapter.connection_named('master'):
             self.create_schemas(adapter, selected_uids)
@@ -436,6 +425,7 @@ class RunTask(CompileTask):
         return ResourceTypeSelector(
             graph=self.graph,
             manifest=self.manifest,
+            previous_state=self.previous_state,
             resource_types=[NodeType.Model],
         )
 

@@ -3,12 +3,16 @@ from unittest.mock import MagicMock, patch
 
 import dbt.flags
 import dbt.compilation
+from dbt.adapters.postgres import Plugin
+from dbt.contracts.files import FileHash
 from dbt.contracts.graph.manifest import Manifest
 from dbt.contracts.graph.parsed import NodeConfig, DependsOn, ParsedModelNode
 from dbt.contracts.graph.compiled import CompiledModelNode, InjectedCTE
 from dbt.node_types import NodeType
 
 from datetime import datetime
+
+from .utils import inject_adapter, clear_plugin, config_from_parts_or_dicts
 
 
 class CompilerTest(unittest.TestCase):
@@ -33,9 +37,45 @@ class CompilerTest(unittest.TestCase):
             'column_types': {},
             'tags': [],
         })
-        self.mock_config = MagicMock(credentials=MagicMock(type='postgres'))
+
+        project_cfg = {
+            'name': 'X',
+            'version': '0.1',
+            'profile': 'test',
+            'project-root': '/tmp/dbt/does-not-exist',
+        }
+        profile_cfg = {
+            'outputs': {
+                'test': {
+                    'type': 'postgres',
+                    'dbname': 'postgres',
+                    'user': 'root',
+                    'host': 'thishostshouldnotexist',
+                    'pass': 'password',
+                    'port': 5432,
+                    'schema': 'public'
+                }
+            },
+            'target': 'test'
+        }
+
+        self.config = config_from_parts_or_dicts(project_cfg, profile_cfg)
+
         self._generate_runtime_model_patch = patch.object(dbt.compilation, 'generate_runtime_model')
         self.mock_generate_runtime_model = self._generate_runtime_model_patch.start()
+
+        inject_adapter(Plugin.adapter(self.config), Plugin)
+
+        # self.mock_adapter = PostgresAdapter MagicMock(type=MagicMock(return_value='postgres'))
+        # self.mock_adapter.Relation =
+        # self.mock_adapter.get_compiler.return_value = dbt.compilation.Compiler
+        # self.mock_plugin = MagicMock(
+        #     adapter=MagicMock(
+        #         credentials=MagicMock(return_value='postgres')
+        #     )
+        # )
+        # inject_adapter(self.mock_adapter, self.mock_plugin)
+        # so we can make an adapter
 
         def mock_generate_runtime_model_context(model, config, manifest):
             def ref(name):
@@ -49,6 +89,7 @@ class CompilerTest(unittest.TestCase):
 
     def tearDown(self):
         self._generate_runtime_model_patch.stop()
+        clear_plugin(Plugin)
 
     def test__prepend_ctes__already_has_cte(self):
         ephemeral_config = self.model_config.replace(materialized='ephemeral')
@@ -80,7 +121,8 @@ class CompilerTest(unittest.TestCase):
                     injected_sql='',
                     compiled_sql=(
                         'with cte as (select * from something_else) '
-                        'select * from __dbt__CTE__ephemeral')
+                        'select * from __dbt__CTE__ephemeral'),
+                    checksum=FileHash.from_contents(''),
                 ),
                 'model.root.ephemeral': CompiledModelNode(
                     name='ephemeral',
@@ -104,7 +146,8 @@ class CompilerTest(unittest.TestCase):
                     compiled_sql='select * from source_table',
                     extra_ctes_injected=False,
                     extra_ctes=[],
-                    injected_sql=''
+                    injected_sql='',
+                    checksum=FileHash.from_contents(''),
                 ),
             },
             sources={},
@@ -115,7 +158,7 @@ class CompilerTest(unittest.TestCase):
             files={},
         )
 
-        compiler = dbt.compilation.Compiler(self.mock_config)
+        compiler = dbt.compilation.Compiler(self.config)
         result, _ = compiler._recursively_prepend_ctes(
             manifest.nodes['model.root.view'],
             manifest,
@@ -163,7 +206,8 @@ class CompilerTest(unittest.TestCase):
                     extra_ctes=[],
                     injected_sql='',
                     compiled_sql=('with cte as (select * from something_else) '
-                                  'select * from source_table')
+                                  'select * from source_table'),
+                    checksum=FileHash.from_contents(''),
                 ),
                 'model.root.view_no_cte': CompiledModelNode(
                     name='view_no_cte',
@@ -187,7 +231,8 @@ class CompilerTest(unittest.TestCase):
                     extra_ctes_injected=False,
                     extra_ctes=[],
                     injected_sql='',
-                    compiled_sql=('select * from source_table')
+                    compiled_sql=('select * from source_table'),
+                    checksum=FileHash.from_contents(''),
                 ),
             },
             sources={},
@@ -197,7 +242,7 @@ class CompilerTest(unittest.TestCase):
             files={},
         )
 
-        compiler = dbt.compilation.Compiler(self.mock_config)
+        compiler = dbt.compilation.Compiler(self.config)
         result, _ = compiler._recursively_prepend_ctes(
             manifest.nodes['model.root.view'],
             manifest,
@@ -212,7 +257,7 @@ class CompilerTest(unittest.TestCase):
             result.injected_sql,
             manifest.nodes.get('model.root.view').compiled_sql)
 
-        compiler = dbt.compilation.Compiler(self.mock_config)
+        compiler = dbt.compilation.Compiler(self.config)
         result, _ = compiler._recursively_prepend_ctes(
             manifest.nodes.get('model.root.view_no_cte'),
             manifest,
@@ -254,7 +299,8 @@ class CompilerTest(unittest.TestCase):
                     extra_ctes_injected=False,
                     extra_ctes=[InjectedCTE(id='model.root.ephemeral', sql='select * from source_table')],
                     injected_sql='',
-                    compiled_sql='select * from __dbt__CTE__ephemeral'
+                    compiled_sql='select * from __dbt__CTE__ephemeral',
+                    checksum=FileHash.from_contents(''),
                 ),
                 'model.root.ephemeral': CompiledModelNode(
                     name='ephemeral',
@@ -278,7 +324,8 @@ class CompilerTest(unittest.TestCase):
                     extra_ctes_injected=False,
                     extra_ctes=[],
                     injected_sql='',
-                    compiled_sql='select * from source_table'
+                    compiled_sql='select * from source_table',
+                    checksum=FileHash.from_contents(''),
                 ),
             },
             sources={},
@@ -288,7 +335,7 @@ class CompilerTest(unittest.TestCase):
             files={},
         )
 
-        compiler = dbt.compilation.Compiler(self.mock_config)
+        compiler = dbt.compilation.Compiler(self.config)
         result, _ = compiler._recursively_prepend_ctes(
             manifest.nodes['model.root.view'],
             manifest,
@@ -328,6 +375,7 @@ class CompilerTest(unittest.TestCase):
             path='ephemeral.sql',
             original_file_path='ephemeral.sql',
             raw_sql='select * from source_table',
+            checksum=FileHash.from_contents(''),
         )
         compiled_ephemeral = CompiledModelNode(
             name='ephemeral',
@@ -352,6 +400,7 @@ class CompilerTest(unittest.TestCase):
             injected_sql='select * from source_table',
             extra_ctes_injected=True,
             extra_ctes=[],
+            checksum=FileHash.from_contents(''),
         )
         manifest = Manifest(
             macros={},
@@ -378,7 +427,8 @@ class CompilerTest(unittest.TestCase):
                     extra_ctes_injected=False,
                     extra_ctes=[InjectedCTE(id='model.root.ephemeral', sql='select * from source_table')],
                     injected_sql='',
-                    compiled_sql='select * from __dbt__CTE__ephemeral'
+                    compiled_sql='select * from __dbt__CTE__ephemeral',
+                    checksum=FileHash.from_contents(''),
                 ),
                 'model.root.ephemeral': parsed_ephemeral,
             },
@@ -389,7 +439,7 @@ class CompilerTest(unittest.TestCase):
             files={},
         )
 
-        compiler = dbt.compilation.Compiler(self.mock_config)
+        compiler = dbt.compilation.Compiler(self.config)
         with patch.object(compiler, 'compile_node') as compile_node:
             compile_node.return_value = compiled_ephemeral
 
@@ -442,7 +492,9 @@ class CompilerTest(unittest.TestCase):
                     extra_ctes_injected=False,
                     extra_ctes=[InjectedCTE(id='model.root.ephemeral', sql=None)],
                     injected_sql=None,
-                    compiled_sql='select * from __dbt__CTE__ephemeral'
+                    compiled_sql='select * from __dbt__CTE__ephemeral',
+                    checksum=FileHash.from_contents(''),
+
                 ),
                 'model.root.ephemeral': ParsedModelNode(
                     name='ephemeral',
@@ -462,6 +514,7 @@ class CompilerTest(unittest.TestCase):
                     path='ephemeral.sql',
                     original_file_path='ephemeral.sql',
                     raw_sql='select * from {{ref("ephemeral_level_two")}}',
+                    checksum=FileHash.from_contents(''),
                 ),
                 'model.root.ephemeral_level_two': ParsedModelNode(
                     name='ephemeral_level_two',
@@ -481,6 +534,7 @@ class CompilerTest(unittest.TestCase):
                     path='ephemeral_level_two.sql',
                     original_file_path='ephemeral_level_two.sql',
                     raw_sql='select * from source_table',
+                    checksum=FileHash.from_contents(''),
                 ),
             },
             sources={},
@@ -490,9 +544,7 @@ class CompilerTest(unittest.TestCase):
             files={},
         )
 
-        compiler = dbt.compilation.Compiler(
-            MagicMock(credentials=MagicMock(type='postgres'))
-        )
+        compiler = dbt.compilation.Compiler(self.config)
         result, _ = compiler._recursively_prepend_ctes(
             manifest.nodes['model.root.view'],
             manifest,

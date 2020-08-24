@@ -1,23 +1,54 @@
 ## dbt 0.18.0 (Release TBD)
 
 
-### Features
-- Add support for impersonating a service account using `impersonate_service_account` in the BigQuery profile configuration ([#2677](https://github.com/fishtown-analytics/dbt/issues/2677)) ([docs](https://docs.getdbt.com/reference/warehouse-profiles/bigquery-profile#service-account-impersonation))
-- Macros in the current project can override internal dbt macros that are called through `execute_macros`. ([#2301](https://github.com/fishtown-analytics/dbt/issues/2301), [#2686](https://github.com/fishtown-analytics/dbt/pull/2686))
-- Add better retry support when using the BigQuery adapter ([#2694](https://github.com/fishtown-analytics/dbt/pull/2694), follow-up to [#1963](https://github.com/fishtown-analytics/dbt/pull/1963))
+### Under the hood
+- Added 3 more adapter methods that the new dbt-adapter-test suite can use for testing. ([#2492](https://github.com/fishtown-analytics/dbt/issues/2492), [#2721](https://github.com/fishtown-analytics/dbt/pull/2721))
+
+
+## dbt 0.18.0rc1 (August 19, 2020)
 
 
 ### Breaking changes
 - `adapter_macro` is no longer a macro, instead it is a builtin context method. Any custom macros that intercepted it by going through `context['dbt']` will need to instead access it via `context['builtins']` ([#2302](https://github.com/fishtown-analytics/dbt/issues/2302), [#2673](https://github.com/fishtown-analytics/dbt/pull/2673))
 - `adapter_macro` is now deprecated. Use `adapter.dispatch` instead.
+- Data tests are now written as CTEs instead of subqueries. Adapter plugins for adapters that don't support CTEs may require modification. ([#2712](https://github.com/fishtown-analytics/dbt/pull/2712))
+
+
+### Under the hood
+- Upgraded snowflake-connector-python dependency to 2.2.10 and enabled the SSO token cache ([#2613](https://github.com/fishtown-analytics/dbt/issues/2613), [#2689](https://github.com/fishtown-analytics/dbt/issues/2689), [#2698](https://github.com/fishtown-analytics/dbt/pull/2698))
+- Add deprecation warnings to anonymous usage tracking ([#2688](https://github.com/fishtown-analytics/dbt/issues/2688), [#2710](https://github.com/fishtown-analytics/dbt/issues/2710))
+- Data tests now behave like dbt CTEs ([#2609](https://github.com/fishtown-analytics/dbt/issues/2609), [#2712](https://github.com/fishtown-analytics/dbt/pull/2712))
+- Adapter plugins can now override the CTE prefix by overriding their `Relation` attribute with a class that has a custom `add_ephemeral_prefix` implementation. ([#2660](https://github.com/fishtown-analytics/dbt/issues/2660), [#2712](https://github.com/fishtown-analytics/dbt/pull/2712))
 
 ### Features
+- Add a BigQuery adapter macro to enable usage of CopyJobs ([#2709](https://github.com/fishtown-analytics/dbt/pull/2709))
+- Support TTL for BigQuery tables([#2711](https://github.com/fishtown-analytics/dbt/pull/2711))
+- Add better retry support when using the BigQuery adapter ([#2694](https://github.com/fishtown-analytics/dbt/pull/2694), follow-up to [#1963](https://github.com/fishtown-analytics/dbt/pull/1963))
 - Added a `dispatch` method to the context adapter and deprecated `adapter_macro`. ([#2302](https://github.com/fishtown-analytics/dbt/issues/2302), [#2679](https://github.com/fishtown-analytics/dbt/pull/2679))
 - The built-in schema tests now use `adapter.dispatch`, so they can be overridden for adapter plugins ([#2415](https://github.com/fishtown-analytics/dbt/issues/2415), [#2684](https://github.com/fishtown-analytics/dbt/pull/2684))
+- Add support for impersonating a service account using `impersonate_service_account` in the BigQuery profile configuration ([#2677](https://github.com/fishtown-analytics/dbt/issues/2677)) ([docs](https://docs.getdbt.com/reference/warehouse-profiles/bigquery-profile#service-account-impersonation))
+- Macros in the current project can override internal dbt macros that are called through `execute_macros`. ([#2301](https://github.com/fishtown-analytics/dbt/issues/2301), [#2686](https://github.com/fishtown-analytics/dbt/pull/2686))
+- Add state:modified and state:new selectors ([#2641](https://github.com/fishtown-analytics/dbt/issues/2641), [#2695](https://github.com/fishtown-analytics/dbt/pull/2695))
+- Add two new flags `--use-colors` and `--no-use-colors` to `dbt run` command to enable or disable log colorization from the command line ([#2708](https://github.com/fishtown-analytics/dbt/pull/2708))
+
+
+### Fixes
+- Fix Redshift table size estimation; e.g. 44 GB tables are no longer reported as 44 KB. [#2702](https://github.com/fishtown-analytics/dbt/issues/2702)
+- Fix issue where jinja that only contained jinja comments wasn't rendered. ([#2707](https://github.com/fishtown-analytics/dbt/issues/2707), [#2178](https://github.com/fishtown-analytics/dbt/pull/2178))
+
+### Docs
+- Add "Referenced By" and "Depends On" sections for each node ([docs#106](https://github.com/fishtown-analytics/dbt-docs/pull/106))
+- Add Name, Description, Column, SQL, Tags filters to site search ([docs#108](https://github.com/fishtown-analytics/dbt-docs/pull/108))
+- Add relevance criteria to site search ([docs#113](https://github.com/fishtown-analytics/dbt-docs/pull/113))
+- Support new selector methods, intersection, and arbitrary parent/child depth in DAG selection syntax ([docs#118](https://github.com/fishtown-analytics/dbt-docs/pull/118))
 
 Contributors:
 - [@bbhoss](https://github.com/bbhoss) ([#2677](https://github.com/fishtown-analytics/dbt/pull/2677))
-- [@kconvey](https://github.com/kconvey) ([#2694](https://github.com/fishtown-analytics/dbt/pull/2694))
+- [@kconvey](https://github.com/kconvey) ([#2694](https://github.com/fishtown-analytics/dbt/pull/2694), [#2709](https://github.com/fishtown-analytics/dbt/pull/2709)), [#2711](https://github.com/fishtown-analytics/dbt/pull/2711))
+- [@vogt4nick](https://github.com/vogt4nick) ([#2702](https://github.com/fishtown-analytics/dbt/issues/2702))
+- [@stephen8chang](https://github.com/stephen8chang) ([docs#106](https://github.com/fishtown-analytics/dbt-docs/pull/106), [docs#108](https://github.com/fishtown-analytics/dbt-docs/pull/108), [docs#113](https://github.com/fishtown-analytics/dbt-docs/pull/113))
+- [@rsenseman](https://github.com/rsenseman) ([#2708](https://github.com/fishtown-analytics/dbt/pull/2708))
+
 
 ## dbt 0.18.0b2 (July 30, 2020)
 

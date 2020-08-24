@@ -25,7 +25,9 @@ from dbt.adapters.protocol import (
 )
 from dbt.clients.agate_helper import empty_table, merge_tables, table_from_rows
 from dbt.clients.jinja import MacroGenerator
-from dbt.contracts.graph.compiled import CompileResultNode, CompiledSeedNode
+from dbt.contracts.graph.compiled import (
+    CompileResultNode, CompiledSeedNode
+)
 from dbt.contracts.graph.manifest import Manifest
 from dbt.contracts.graph.parsed import ParsedSeedNode
 from dbt.exceptions import warn_or_error
@@ -289,7 +291,10 @@ class BaseAdapter(metaclass=AdapterMeta):
         return {
             self.Relation.create_from(self.config, node).without_identifier()
             for node in manifest.nodes.values()
-            if node.resource_type in NodeType.executable()
+            if (
+                node.resource_type in NodeType.executable() and
+                not node.is_ephemeral_model
+            )
         }
 
     def _get_catalog_schemas(self, manifest: Manifest) -> SchemaSearchMap:
@@ -1112,6 +1117,44 @@ class BaseAdapter(metaclass=AdapterMeta):
         The second parameter is the value returned by pre_mdoel_hook.
         """
         pass
+
+    def get_compiler(self):
+        from dbt.compilation import Compiler
+        return Compiler(self.config)
+
+    # Methods used in adapter tests
+    def update_column_sql(
+        self,
+        dst_name: str,
+        dst_column: str,
+        clause: str,
+        where_clause: Optional[str] = None,
+    ) -> str:
+        clause = f'update {dst_name} set {dst_column} = {clause}'
+        if where_clause is not None:
+            clause += f' where {where_clause}'
+        return clause
+
+    def timestamp_add_sql(
+        self, add_to: str, number: int = 1, interval: str = 'hour'
+    ) -> str:
+        # for backwards compatibility, we're compelled to set some sort of
+        # default. A lot of searching has lead me to believe that the
+        # '+ interval' syntax used in postgres/redshift is relatively common
+        # and might even be the SQL standard's intention.
+        return f"{add_to} + interval '{number} {interval}'"
+
+    def string_add_sql(
+        self, add_to: str, value: str, location='append',
+    ) -> str:
+        if location == 'append':
+            return f"{add_to} || '{value}'"
+        elif location == 'prepend':
+            return f"'{value}' || {add_to}"
+        else:
+            raise RuntimeException(
+                f'Got an unexpected location value of "{location}"'
+            )
 
     def get_rows_different_sql(
         self,

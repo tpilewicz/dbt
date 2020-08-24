@@ -4,7 +4,7 @@ from abc import abstractmethod
 from concurrent.futures import as_completed
 from datetime import datetime
 from multiprocessing.dummy import Pool as ThreadPool
-from typing import Optional, Dict, List, Set, Tuple, Iterable
+from typing import Optional, Dict, List, Set, Tuple, Iterable, AbstractSet
 
 from .printer import (
     print_run_result_error,
@@ -26,12 +26,12 @@ from dbt.logger import (
     NodeCount,
     print_timestamped_line,
 )
-from dbt.compilation import compile_manifest
 
 from dbt.contracts.graph.compiled import CompileResultNode
 from dbt.contracts.graph.manifest import Manifest
 from dbt.contracts.graph.parsed import ParsedSourceDefinition
 from dbt.contracts.results import ExecutionResult
+from dbt.contracts.state import PreviousState
 from dbt.exceptions import (
     InternalException,
     NotImplementedException,
@@ -70,7 +70,9 @@ class ManifestTask(ConfiguredTask):
             raise InternalException(
                 'compile_manifest called before manifest was loaded'
             )
-        self.graph = compile_manifest(self.config, self.manifest)
+        adapter = get_adapter(self.config)
+        compiler = adapter.get_compiler()
+        self.graph = compiler.compile(self.manifest)
 
     def _runtime_initialize(self):
         self.load_manifest()
@@ -88,6 +90,9 @@ class GraphRunnableTask(ManifestTask):
         self.node_results = []
         self._skipped_children = {}
         self._raise_next_tick = None
+        self.previous_state: Optional[PreviousState] = None
+        if self.args.state is not None:
+            self.previous_state = PreviousState(self.args.state)
 
     def index_offset(self, value: int) -> int:
         return value
@@ -356,7 +361,7 @@ class GraphRunnableTask(ManifestTask):
     def before_hooks(self, adapter):
         pass
 
-    def before_run(self, adapter, selected_uids):
+    def before_run(self, adapter, selected_uids: AbstractSet[str]):
         with adapter.connection_named('master'):
             self.populate_adapter_cache(adapter)
 
@@ -366,7 +371,7 @@ class GraphRunnableTask(ManifestTask):
     def after_hooks(self, adapter, results, elapsed):
         pass
 
-    def execute_with_hooks(self, selected_uids):
+    def execute_with_hooks(self, selected_uids: AbstractSet[str]):
         adapter = get_adapter(self.config)
         try:
             self.before_hooks(adapter)

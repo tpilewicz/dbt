@@ -32,6 +32,10 @@ import time
 import agate
 import json
 
+# Write dispositions for bigquery.
+WRITE_APPEND = google.cloud.bigquery.job.WriteDisposition.WRITE_APPEND
+WRITE_TRUNCATE = google.cloud.bigquery.job.WriteDisposition.WRITE_TRUNCATE
+
 
 def sql_escape(string):
     if not isinstance(string, str):
@@ -104,6 +108,7 @@ class BigqueryConfig(AdapterConfig):
     labels: Optional[Dict[str, str]] = None
     partitions: Optional[List[str]] = None
     grant_access_to: Optional[List[Dict[str, str]]] = None
+    hours_to_expiration: Optional[int] = None
 
 
 class BigQueryAdapter(BaseAdapter):
@@ -415,6 +420,23 @@ class BigQueryAdapter(BaseAdapter):
         )
 
         return "CREATE TABLE"
+
+    @available.parse(lambda *a, **k: '')
+    def copy_table(self, source, destination, materialization):
+        if materialization == 'incremental':
+            write_disposition = WRITE_APPEND
+        elif materialization == 'table':
+            write_disposition = WRITE_TRUNCATE
+        else:
+            dbt.exceptions.raise_compiler_error(
+                'Copy table materialization must be "copy" or "table", but '
+                f"config.get('copy_materialization', 'table') was "
+                f'{materialization}')
+
+        self.connections.copy_bq_table(
+            source, destination, write_disposition)
+
+        return "COPY TABLE with materialization: {}".format(materialization)
 
     @classmethod
     def poll_until_job_completes(cls, job, timeout):
@@ -745,6 +767,12 @@ class BigQueryAdapter(BaseAdapter):
             expiration = 'TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 12 hour)'
             opts['expiration_timestamp'] = expiration
 
+        if (config.get('hours_to_expiration') is not None) and (not temporary):
+            expiration = (
+                'TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL '
+                '{} hour)').format(config.get('hours_to_expiration'))
+            opts['expiration_timestamp'] = expiration
+
         if config.persist_relation_docs() and 'description' in node:
             description = sql_escape(node['description'])
             opts['description'] = '"""{}"""'.format(description)
@@ -803,3 +831,20 @@ class BigQueryAdapter(BaseAdapter):
             column_names=column_names,
             except_operator=except_operator,
         )
+
+    def timestamp_add_sql(
+        self, add_to: str, number: int = 1, interval: str = 'hour'
+    ) -> str:
+        return f'timestamp_add({add_to}, interval {number} {interval})'
+
+    def string_add_sql(
+        self, add_to: str, value: str, location='append',
+    ) -> str:
+        if location == 'append':
+            return f"concat({add_to}, '{value}')"
+        elif location == 'prepend':
+            return f"concat('{value}', {add_to})"
+        else:
+            raise dbt.exceptions.RuntimeException(
+                f'Got an unexpected location value of "{location}"'
+            )

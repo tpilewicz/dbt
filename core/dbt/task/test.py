@@ -41,10 +41,9 @@ class TestRunner(CompileRunner):
         print_start_line(description, self.node_index, self.num_nodes)
 
     def execute_data_test(self, test: CompiledDataTestNode):
-        sql = (
-            f'select count(*) as errors from (\n{test.injected_sql}\n) sbq'
+        res, table = self.adapter.execute(
+            test.injected_sql, auto_begin=True, fetch=True
         )
-        res, table = self.adapter.execute(sql, auto_begin=True, fetch=True)
 
         num_rows = len(table.rows)
         if num_rows != 1:
@@ -107,10 +106,11 @@ SCHEMA_TEST_TYPES = (CompiledSchemaTestNode, ParsedSchemaTestNode)
 
 
 class TestSelector(ResourceTypeSelector):
-    def __init__(self, graph, manifest):
+    def __init__(self, graph, manifest, previous_state):
         super().__init__(
             graph=graph,
             manifest=manifest,
+            previous_state=previous_state,
             resource_types=[NodeType.Test],
         )
 
@@ -153,6 +153,7 @@ class TestTask(RunTask):
         return TestSelector(
             graph=self.graph,
             manifest=self.manifest,
+            previous_state=self.previous_state,
         )
 
     def get_runner_type(self):

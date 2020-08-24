@@ -9,6 +9,7 @@ from unittest import mock
 from unittest import TestCase
 
 import agate
+import pytest
 from hologram import ValidationError
 
 
@@ -111,6 +112,14 @@ def inject_plugin(plugin):
     FACTORY.plugins[key] = plugin
 
 
+def inject_plugin_for(config):
+    # from dbt.adapters.postgres import Plugin, PostgresAdapter
+    from dbt.adapters.factory import FACTORY
+    FACTORY.load_plugin(config.credentials.type)
+    adapter = FACTORY.get_adapter(config)
+    return adapter
+
+
 def inject_adapter(value, plugin):
     """Inject the given adapter into the adapter factory, so your hand-crafted
     artisanal adapter will be available from get_adapter() as if dbt loaded it.
@@ -153,6 +162,26 @@ class ContractTestCase(TestCase):
 
         with self.assertRaises(ValidationError):
             cls.from_dict(dct)
+
+
+def assert_to_dict(obj, dct):
+    assert obj.to_dict() == dct
+
+
+def assert_from_dict(obj, dct, cls=None):
+    if cls is None:
+        cls = obj.__class__
+    assert cls.from_dict(dct) == obj
+
+
+def assert_symmetric(obj, dct, cls=None):
+    assert_to_dict(obj, dct)
+    assert_from_dict(obj, dct, cls)
+
+
+def assert_fails_validation(dct, cls):
+    with pytest.raises(ValidationError):
+        cls.from_dict(dct)
 
 
 def generate_name_macros(package):
